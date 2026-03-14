@@ -1,5 +1,6 @@
 import inquirer from 'inquirer';
-import { existsSync } from 'node:fs';
+import autocomplete from 'inquirer-autocomplete-prompt';
+import Fuse from 'fuse.js';
 import type {
   ObjectPermissions,
   FieldPermissions,
@@ -7,60 +8,117 @@ import type {
   PermissionChange,
 } from './types.js';
 
-interface ObjectChoice {
-  name: string;
-  value: string;
-}
+inquirer.registerPrompt('autocomplete', autocomplete);
 
-export async function promptObjectSelection(objects: string[]): Promise<string[]> {
-  const choices: ObjectChoice[] = objects.map((o) => ({ name: o, value: o }));
+export async function promptObjectSearch(objects: string[]): Promise<string[]> {
+  const selected: string[] = [];
+  const remaining = [...objects];
 
-  const { selected } = await inquirer.prompt([
-    {
-      type: 'checkbox',
-      name: 'selected',
-      message: 'Select objects (type to filter):',
-      choices,
-      loop: false,
-      pageSize: 20,
-    },
-  ]);
+  console.log('Start typing to search for an object. Select it to add.\n');
+
+  while (true) {
+    const fuse = new Fuse(remaining, { threshold: 0.4, includeScore: true });
+
+    const { object } = await inquirer.prompt([
+      {
+        type: 'autocomplete',
+        name: 'object',
+        message: selected.length > 0
+          ? `Selected: [${selected.join(', ')}] — Search for another object (or type "done"):`
+          : 'Search for an object:',
+        source: (_answers: unknown, input: string | undefined) => {
+          const query = (input || '').trim();
+          if (!query) {
+            const opts = selected.length > 0 ? ['>> Done selecting objects <<', ...remaining] : remaining;
+            return Promise.resolve(opts);
+          }
+          if ('done'.startsWith(query.toLowerCase()) && selected.length > 0) {
+            return Promise.resolve(['>> Done selecting objects <<', ...fuse.search(query).map((r) => r.item)]);
+          }
+          return Promise.resolve(fuse.search(query).map((r) => r.item));
+        },
+        pageSize: 15,
+      } as never,
+    ]);
+
+    if (object === '>> Done selecting objects <<') break;
+
+    selected.push(object);
+    remaining.splice(remaining.indexOf(object), 1);
+    console.log(`  Added: ${object}`);
+
+    if (remaining.length === 0) break;
+
+    const { addMore } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'addMore',
+        message: 'Add another object?',
+        default: false,
+      },
+    ]);
+
+    if (!addMore) break;
+  }
 
   if (selected.length === 0) {
-    console.log('No objects selected.');
+    console.log('No objects selected. Exiting.');
     process.exit(0);
   }
 
   return selected;
 }
 
-export async function promptFieldSelection(
-  objectName: string,
-  fields: string[],
-): Promise<string[]> {
-  const { selectFields } = await inquirer.prompt([
-    {
-      type: 'confirm',
-      name: 'selectFields',
-      message: `Select individual fields from ${objectName}?`,
-      default: false,
-    },
-  ]);
+export async function promptFieldSearch(objectName: string, fields: string[]): Promise<string[]> {
+  const selected: string[] = [];
+  const remaining = [...fields];
 
-  if (!selectFields) return [];
+  console.log(`\nStart typing to search for a field on ${objectName}.\n`);
 
-  const choices = fields.map((f) => ({ name: f, value: f }));
+  while (true) {
+    const fuse = new Fuse(remaining, { threshold: 0.4, includeScore: true });
 
-  const { selected } = await inquirer.prompt([
-    {
-      type: 'checkbox',
-      name: 'selected',
-      message: `Select fields from ${objectName}:`,
-      choices,
-      loop: false,
-      pageSize: 20,
-    },
-  ]);
+    const { field } = await inquirer.prompt([
+      {
+        type: 'autocomplete',
+        name: 'field',
+        message: selected.length > 0
+          ? `Selected: [${selected.map(f => f.split('.')[1]).join(', ')}] — Search for another field (or type "done"):`
+          : `Search for a field on ${objectName}:`,
+        source: (_answers: unknown, input: string | undefined) => {
+          const query = (input || '').trim();
+          if (!query) {
+            const opts = selected.length > 0 ? ['>> Done selecting fields <<', ...remaining] : remaining;
+            return Promise.resolve(opts);
+          }
+          if ('done'.startsWith(query.toLowerCase()) && selected.length > 0) {
+            return Promise.resolve(['>> Done selecting fields <<', ...fuse.search(query).map((r) => r.item)]);
+          }
+          return Promise.resolve(fuse.search(query).map((r) => r.item));
+        },
+        pageSize: 15,
+      } as never,
+    ]);
+
+    if (field === '>> Done selecting fields <<') break;
+
+    selected.push(field);
+    remaining.splice(remaining.indexOf(field), 1);
+    console.log(`  Added: ${field}`);
+
+    if (remaining.length === 0) break;
+
+    const { addMore } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'addMore',
+        message: 'Add another field?',
+        default: false,
+      },
+    ]);
+
+    if (!addMore) break;
+  }
 
   return selected;
 }
@@ -132,8 +190,13 @@ export async function promptFieldPermissions(fieldNames: string[]): Promise<Fiel
 export async function promptPermissionSetSelection(
   targets: PermissionSetTarget[],
 ): Promise<PermissionSetTarget[]> {
+  if (targets.length === 0) {
+    console.log('No permission set files found in the project.');
+    process.exit(1);
+  }
+
   const choices = targets.map((t) => ({
-    name: t.filePath ? t.name : `${t.name} (new file)`,
+    name: t.name,
     value: t.name,
   }));
 
@@ -141,7 +204,7 @@ export async function promptPermissionSetSelection(
     {
       type: 'checkbox',
       name: 'selected',
-      message: 'Select permission sets to update:',
+      message: 'Select permission sets to update (press <space> to select, <enter> to confirm):',
       choices,
       loop: false,
       pageSize: 20,
@@ -164,12 +227,10 @@ export function printPreview(
   console.log('\n--- Preview ---\n');
 
   for (const target of targets) {
-    const isNew = !target.filePath || !existsSync(target.filePath);
-    console.log(`Permission Set: ${target.name}${isNew ? ' (new file)' : ''}`);
+    console.log(`Permission Set: ${target.name}`);
 
     for (const change of changes) {
-      const itemName =
-        change.selection.type === 'object' ? change.selection.name : change.selection.name;
+      const itemName = change.selection.name;
 
       const permEntries: string[] = [];
       const perms = change.permissions;

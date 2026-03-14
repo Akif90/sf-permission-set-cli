@@ -101,32 +101,63 @@ describe('applyFieldPermission', () => {
     expect(xml).toContain('<editable>false</editable>');
   });
 
-  it('should update existing field permission', () => {
+  it('should not downgrade existing field permission', () => {
+    // Admin fixture has Account.Industry with editable=true, readable=true
     const parsed = parsePermissionSetXml(join(FIXTURES_DIR, 'Admin.permissionset-meta.xml'));
     applyFieldPermission(parsed, 'Account.Industry', {
       readable: true,
-      editable: false,
+      editable: false, // user did not select Edit — existing true should remain
     });
     const xml = serializePermissionSetXml(parsed);
     expect(xml).toContain('<field>Account.Industry</field>');
-    expect(xml).toContain('<editable>false</editable>');
+    expect(xml).toContain('<editable>true</editable>'); // preserved, not overwritten
     const fieldCount = (xml.match(/<field>Account\.Industry<\/field>/g) || []).length;
     expect(fieldCount).toBe(1);
+  });
+});
+
+describe('merge behavior — never downgrade existing permissions', () => {
+  it('should preserve existing true permissions when user selects false', () => {
+    // Admin fixture: Account has allowCreate=true, allowDelete=true, allowEdit=true, allowRead=true
+    const parsed = parsePermissionSetXml(join(FIXTURES_DIR, 'Admin.permissionset-meta.xml'));
+    applyObjectPermission(parsed, 'Account', {
+      allowRead: true,
+      allowCreate: false, // user didn't select Create, but it's already true
+      allowEdit: false,   // user didn't select Edit, but it's already true
+      allowDelete: false,
+      viewAllRecords: true, // user selected this — should upgrade
+      modifyAllRecords: false,
+    });
+    const xml = serializePermissionSetXml(parsed);
+    expect(xml).toContain('<allowCreate>true</allowCreate>');  // preserved
+    expect(xml).toContain('<allowEdit>true</allowEdit>');      // preserved
+    expect(xml).toContain('<allowDelete>true</allowDelete>');  // preserved
+    expect(xml).toContain('<viewAllRecords>true</viewAllRecords>'); // upgraded
   });
 });
 
 describe('round-trip', () => {
   it('should preserve structure on parse-serialize round-trip', () => {
     const filePath = join(FIXTURES_DIR, 'Admin.permissionset-meta.xml');
-    const original = readFileSync(filePath, 'utf-8');
     const parsed = parsePermissionSetXml(filePath);
     const serialized = serializePermissionSetXml(parsed);
 
-    // Should contain all key elements
     expect(serialized).toContain('<PermissionSet');
     expect(serialized).toContain('<object>Account</object>');
     expect(serialized).toContain('<field>Account.Industry</field>');
     expect(serialized).toContain('<label>Admin</label>');
+  });
+
+  it('should not produce blank lines in output', () => {
+    const filePath = join(FIXTURES_DIR, 'Admin.permissionset-meta.xml');
+    const parsed = parsePermissionSetXml(filePath);
+    applyObjectPermission(parsed, 'Contact', {
+      allowRead: true, allowCreate: false, allowEdit: false,
+      allowDelete: false, viewAllRecords: false, modifyAllRecords: false,
+    });
+    const serialized = serializePermissionSetXml(parsed);
+    // No consecutive blank lines
+    expect(serialized).not.toMatch(/\n\s*\n/);
   });
 });
 

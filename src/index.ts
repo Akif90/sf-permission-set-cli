@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { validateEnvironment, getPackageDirectories } from './env.js';
-import { fetchObjectList, fetchFieldsForObject, discoverPermissionSets } from './org-fetch.js';
+import { fetchObjectList, fetchFieldsForObject, discoverLocalPermissionSets } from './org-fetch.js';
 import {
-  promptObjectSelection,
-  promptFieldSelection,
+  promptObjectSearch,
+  promptFieldSearch,
   promptObjectPermissions,
   promptFieldPermissions,
   promptPermissionSetSelection,
@@ -27,9 +27,7 @@ import type {
   PermissionChange,
   ObjectPermissions,
   FieldPermissions,
-  OBJECT_PERMISSION_LABELS,
 } from './types.js';
-import { readFileSync } from 'node:fs';
 
 const OBJECT_PERM_LABEL_MAP: Record<string, string> = {
   allowRead: 'Read',
@@ -73,27 +71,27 @@ Requirements:
 }
 
 async function main(): Promise<void> {
-  console.log('🔧 Permcraft — Salesforce Permission Set Editor\n');
+  console.log('Permcraft — Salesforce Permission Set Editor\n');
 
   // Step 0: Validate environment
   console.log('Checking environment...');
   const { projectRoot, project, org } = validateEnvironment();
-  console.log(`✓ SFDX project found at ${projectRoot}`);
-  console.log(`✓ Connected to org: ${org.username}\n`);
+  console.log(`  Project: ${projectRoot}`);
+  console.log(`  Org: ${org.username}\n`);
 
   const packageDirs = getPackageDirectories(project, projectRoot);
-  const defaultPackageDir = packageDirs[0];
 
-  // Step 1: Fetch and select objects
+  // Step 1: Fetch object list from org
   console.log('Fetching objects from org...');
   const objects = fetchObjectList();
   console.log(`Found ${objects.length} objects.\n`);
 
-  const selectedObjects = await promptObjectSelection(objects);
+  // Step 2: Fuzzy search and select objects
+  const selectedObjects = await promptObjectSearch(objects);
+  console.log(`\nSelected objects: ${selectedObjects.join(', ')}`);
 
-  // Step 1b: Fetch fields for selected objects and optionally select fields
+  // Step 3: For each object, fetch fields and fuzzy search to select
   const allSelections: SelectionItem[] = [];
-  const selectedFieldsByObject: Map<string, string[]> = new Map();
 
   for (const obj of selectedObjects) {
     allSelections.push({ type: 'object', name: obj });
@@ -102,27 +100,24 @@ async function main(): Promise<void> {
     const fields = fetchFieldsForObject(obj);
     console.log(`Found ${fields.length} fields.`);
 
-    const selectedFields = await promptFieldSelection(obj, fields);
-    if (selectedFields.length > 0) {
-      selectedFieldsByObject.set(obj, selectedFields);
-      for (const field of selectedFields) {
-        allSelections.push({ type: 'field', name: field, object: obj });
-      }
+    const selectedFields = await promptFieldSearch(obj, fields);
+    for (const field of selectedFields) {
+      allSelections.push({ type: 'field', name: field, object: obj });
     }
   }
 
-  // Step 2: Select permissions
+  // Step 4: Select permissions
   const changes: PermissionChange[] = [];
 
-  // Object permissions
   const objectSelections = allSelections.filter((s) => s.type === 'object');
   if (objectSelections.length > 0) {
+    console.log();
     const rawPerms = await promptObjectPermissions(objectSelections.map((s) => s.name));
     const { resolved, autoEnabled } = resolveObjectDependencies(rawPerms);
     const autoLabels = autoEnabled.map((k) => OBJECT_PERM_LABEL_MAP[k] || k);
 
     if (autoLabels.length > 0) {
-      console.log(`  ↳ Auto-enabled dependencies: ${autoLabels.join(', ')}`);
+      console.log(`  Auto-enabled dependencies: ${autoLabels.join(', ')}`);
     }
 
     for (const sel of objectSelections) {
@@ -130,15 +125,15 @@ async function main(): Promise<void> {
     }
   }
 
-  // Field permissions
   const fieldSelections = allSelections.filter((s) => s.type === 'field');
   if (fieldSelections.length > 0) {
+    console.log();
     const rawPerms = await promptFieldPermissions(fieldSelections.map((s) => s.name));
     const { resolved, autoEnabled } = resolveFieldDependencies(rawPerms);
     const autoLabels = autoEnabled.map((k) => FIELD_PERM_LABEL_MAP[k] || k);
 
     if (autoLabels.length > 0) {
-      console.log(`  ↳ Auto-enabled dependencies: ${autoLabels.join(', ')}`);
+      console.log(`  Auto-enabled dependencies: ${autoLabels.join(', ')}`);
     }
 
     for (const sel of fieldSelections) {
@@ -151,24 +146,23 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // Step 3: Select permission sets
-  console.log('\nDiscovering permission sets...');
-  const allTargets = discoverPermissionSets(packageDirs, defaultPackageDir);
+  // Step 5: Select local permission sets
+  console.log('\nScanning local permission sets...');
+  const allTargets = discoverLocalPermissionSets(packageDirs);
   console.log(`Found ${allTargets.length} permission sets.\n`);
 
   const selectedTargets = await promptPermissionSetSelection(allTargets);
 
-  // Step 4: Preview
+  // Step 6: Preview
   printPreview(changes, selectedTargets);
 
-  // Step 5: Confirm
+  // Step 7: Confirm and apply
   const confirmed = await promptConfirm();
   if (!confirmed) {
     console.log('Cancelled.');
     process.exit(0);
   }
 
-  // Step 6: Apply changes
   console.log('\nApplying changes...\n');
 
   for (const target of selectedTargets) {
@@ -198,7 +192,7 @@ async function main(): Promise<void> {
     writePermissionSetFile(filePath, xml);
   }
 
-  console.log('\n✓ All changes applied successfully!');
+  console.log('\nAll changes applied successfully!');
 }
 
 main().catch((err) => {

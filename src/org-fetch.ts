@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import type { PermissionSetTarget } from './types.js';
 
 function runSfCommand(args: string): unknown {
@@ -60,38 +60,6 @@ function scanLocalPermissionSets(packageDirs: string[]): PermissionSetTarget[] {
   return targets;
 }
 
-function fetchOrgPermissionSets(): string[] {
-  try {
-    const result = runSfCommand(
-      'data query --query "SELECT Name, Label FROM PermissionSet WHERE IsCustom = true"',
-    ) as { records: Array<{ Name: string; Label: string }> };
-    return result.records.map((r) => r.Name);
-  } catch {
-    return [];
-  }
-}
-
-export function discoverPermissionSets(
-  packageDirs: string[],
-  defaultPackageDir: string,
-): PermissionSetTarget[] {
-  const localTargets = scanLocalPermissionSets(packageDirs);
-  const localNames = new Set(localTargets.map((t) => t.name));
-
-  const orgNames = fetchOrgPermissionSets();
-  for (const name of orgNames) {
-    if (!localNames.has(name)) {
-      // Permission set exists in org but not locally — will create a new file
-      const filePath = join(
-        defaultPackageDir,
-        'main',
-        'default',
-        'permissionsets',
-        `${name}.permissionset-meta.xml`,
-      );
-      localTargets.push({ name, filePath, label: name });
-    }
-  }
-
-  return localTargets.sort((a, b) => a.name.localeCompare(b.name));
+export function discoverLocalPermissionSets(packageDirs: string[]): PermissionSetTarget[] {
+  return scanLocalPermissionSets(packageDirs).sort((a, b) => a.name.localeCompare(b.name));
 }

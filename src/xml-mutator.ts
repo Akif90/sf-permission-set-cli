@@ -8,7 +8,7 @@ const PARSER_OPTIONS = {
   preserveOrder: true,
   commentPropName: '#comment',
   parseTagValue: false,
-  trimValues: false,
+  trimValues: true,
 };
 
 const BUILDER_OPTIONS = {
@@ -152,13 +152,16 @@ function findInsertionIndex(
   }
 
   if (lastTagIndex === -1) {
-    // No existing nodes of this type — insert before closing tag
     return children.length;
   }
 
   return insertAfterAll + 1 === 0 ? lastTagIndex : insertAfterAll + 1;
 }
 
+/**
+ * Apply object permissions — only sets permissions the user explicitly enabled (true).
+ * Existing permissions that the user did not select are left unchanged.
+ */
 export function applyObjectPermission(
   parsed: PermSetNode[],
   objectName: string,
@@ -168,13 +171,18 @@ export function applyObjectPermission(
   const existing = findExistingNode(root, 'objectPermissions', 'object', objectName);
 
   if (existing) {
+    // Merge: only upgrade permissions to true, never downgrade existing true → false
     const inner = existing.node['objectPermissions'] as PermSetNode[];
-    setTextValue(inner, 'allowCreate', boolStr(perms.allowCreate));
-    setTextValue(inner, 'allowDelete', boolStr(perms.allowDelete));
-    setTextValue(inner, 'allowEdit', boolStr(perms.allowEdit));
-    setTextValue(inner, 'allowRead', boolStr(perms.allowRead));
-    setTextValue(inner, 'modifyAllRecords', boolStr(perms.modifyAllRecords));
-    setTextValue(inner, 'viewAllRecords', boolStr(perms.viewAllRecords));
+    const keys: (keyof ObjectPermissions)[] = [
+      'allowCreate', 'allowDelete', 'allowEdit', 'allowRead',
+      'modifyAllRecords', 'viewAllRecords',
+    ];
+    for (const key of keys) {
+      if (perms[key]) {
+        setTextValue(inner, key, 'true');
+      }
+      // If perms[key] is false, leave the existing value untouched
+    }
   } else {
     const newNode = buildObjectPermissionNode(objectName, perms);
     const idx = findInsertionIndex(root, 'objectPermissions', 'object', objectName);
@@ -182,6 +190,10 @@ export function applyObjectPermission(
   }
 }
 
+/**
+ * Apply field permissions — only sets permissions the user explicitly enabled (true).
+ * Existing permissions that the user did not select are left unchanged.
+ */
 export function applyFieldPermission(
   parsed: PermSetNode[],
   fieldName: string,
@@ -192,8 +204,12 @@ export function applyFieldPermission(
 
   if (existing) {
     const inner = existing.node['fieldPermissions'] as PermSetNode[];
-    setTextValue(inner, 'editable', boolStr(perms.editable));
-    setTextValue(inner, 'readable', boolStr(perms.readable));
+    if (perms.editable) {
+      setTextValue(inner, 'editable', 'true');
+    }
+    if (perms.readable) {
+      setTextValue(inner, 'readable', 'true');
+    }
   } else {
     const newNode = buildFieldPermissionNode(fieldName, perms);
     const idx = findInsertionIndex(root, 'fieldPermissions', 'field', fieldName);
@@ -204,6 +220,9 @@ export function applyFieldPermission(
 export function serializePermissionSetXml(parsed: PermSetNode[], indent: string = '    '): string {
   const builder = new XMLBuilder({ ...BUILDER_OPTIONS, indentBy: indent });
   let xml = builder.build(parsed) as string;
+
+  // Collapse any multiple consecutive blank lines into a single newline
+  xml = xml.replace(/\n\s*\n/g, '\n');
 
   // Ensure trailing newline
   if (!xml.endsWith('\n')) {
