@@ -6,6 +6,7 @@ import { fetchObjectList, fetchFieldsForObject, discoverLocalPermissionSets } fr
 import {
   promptObjectSearch,
   promptFieldSearch,
+  promptPermissionMode,
   promptObjectPermissions,
   promptFieldPermissions,
   promptPermissionSetSelection,
@@ -106,37 +107,62 @@ async function main(): Promise<void> {
     }
   }
 
-  // Step 4: Select permissions
+  // Step 4: Choose permission mode and assign permissions
   const changes: PermissionChange[] = [];
-
   const objectSelections = allSelections.filter((s) => s.type === 'object');
-  if (objectSelections.length > 0) {
-    console.log();
-    const rawPerms = await promptObjectPermissions(objectSelections.map((s) => s.name));
-    const { resolved, autoEnabled } = resolveObjectDependencies(rawPerms);
-    const autoLabels = autoEnabled.map((k) => OBJECT_PERM_LABEL_MAP[k] || k);
-
-    if (autoLabels.length > 0) {
-      console.log(`  Auto-enabled dependencies: ${autoLabels.join(', ')}`);
-    }
-
-    for (const sel of objectSelections) {
-      changes.push({ selection: sel, permissions: resolved, autoEnabled: autoLabels });
-    }
-  }
-
   const fieldSelections = allSelections.filter((s) => s.type === 'field');
-  if (fieldSelections.length > 0) {
-    console.log();
-    const rawPerms = await promptFieldPermissions(fieldSelections.map((s) => s.name));
-    const { resolved, autoEnabled } = resolveFieldDependencies(rawPerms);
-    const autoLabels = autoEnabled.map((k) => FIELD_PERM_LABEL_MAP[k] || k);
 
-    if (autoLabels.length > 0) {
-      console.log(`  Auto-enabled dependencies: ${autoLabels.join(', ')}`);
+  const hasMultipleItems = objectSelections.length + fieldSelections.length > 1;
+  const mode = hasMultipleItems ? await promptPermissionMode() : 'bulk';
+
+  if (mode === 'bulk') {
+    // Same permissions for all objects, same permissions for all fields
+    if (objectSelections.length > 0) {
+      console.log();
+      const rawPerms = await promptObjectPermissions(objectSelections.map((s) => s.name));
+      const { resolved, autoEnabled } = resolveObjectDependencies(rawPerms);
+      const autoLabels = autoEnabled.map((k) => OBJECT_PERM_LABEL_MAP[k] || k);
+      if (autoLabels.length > 0) {
+        console.log(`  Auto-enabled dependencies: ${autoLabels.join(', ')}`);
+      }
+      for (const sel of objectSelections) {
+        changes.push({ selection: sel, permissions: resolved, autoEnabled: autoLabels });
+      }
+    }
+
+    if (fieldSelections.length > 0) {
+      console.log();
+      const rawPerms = await promptFieldPermissions(fieldSelections.map((s) => s.name));
+      const { resolved, autoEnabled } = resolveFieldDependencies(rawPerms);
+      const autoLabels = autoEnabled.map((k) => FIELD_PERM_LABEL_MAP[k] || k);
+      if (autoLabels.length > 0) {
+        console.log(`  Auto-enabled dependencies: ${autoLabels.join(', ')}`);
+      }
+      for (const sel of fieldSelections) {
+        changes.push({ selection: sel, permissions: resolved, autoEnabled: autoLabels });
+      }
+    }
+  } else {
+    // Granular: individual permissions for each object and field
+    for (const sel of objectSelections) {
+      console.log();
+      const rawPerms = await promptObjectPermissions([sel.name]);
+      const { resolved, autoEnabled } = resolveObjectDependencies(rawPerms);
+      const autoLabels = autoEnabled.map((k) => OBJECT_PERM_LABEL_MAP[k] || k);
+      if (autoLabels.length > 0) {
+        console.log(`  Auto-enabled dependencies: ${autoLabels.join(', ')}`);
+      }
+      changes.push({ selection: sel, permissions: resolved, autoEnabled: autoLabels });
     }
 
     for (const sel of fieldSelections) {
+      console.log();
+      const rawPerms = await promptFieldPermissions([sel.name]);
+      const { resolved, autoEnabled } = resolveFieldDependencies(rawPerms);
+      const autoLabels = autoEnabled.map((k) => FIELD_PERM_LABEL_MAP[k] || k);
+      if (autoLabels.length > 0) {
+        console.log(`  Auto-enabled dependencies: ${autoLabels.join(', ')}`);
+      }
       changes.push({ selection: sel, permissions: resolved, autoEnabled: autoLabels });
     }
   }
@@ -182,7 +208,11 @@ async function main(): Promise<void> {
 
     for (const change of changes) {
       if (change.selection.type === 'object') {
-        applyObjectPermission(parsed, change.selection.name, change.permissions as ObjectPermissions);
+        applyObjectPermission(
+          parsed,
+          change.selection.name,
+          change.permissions as ObjectPermissions,
+        );
       } else {
         applyFieldPermission(parsed, change.selection.name, change.permissions as FieldPermissions);
       }

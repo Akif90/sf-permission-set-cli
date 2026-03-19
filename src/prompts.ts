@@ -23,17 +23,22 @@ export async function promptObjectSearch(objects: string[]): Promise<string[]> {
       {
         type: 'autocomplete',
         name: 'object',
-        message: selected.length > 0
-          ? `Selected: [${selected.join(', ')}] — Search for another object (or type "done"):`
-          : 'Search for an object:',
+        message:
+          selected.length > 0
+            ? `Selected: [${selected.join(', ')}] — Search for another object (or type "done"):`
+            : 'Search for an object:',
         source: (_answers: unknown, input: string | undefined) => {
           const query = (input || '').trim();
           if (!query) {
-            const opts = selected.length > 0 ? ['>> Done selecting objects <<', ...remaining] : remaining;
+            const opts =
+              selected.length > 0 ? ['>> Done selecting objects <<', ...remaining] : remaining;
             return Promise.resolve(opts);
           }
           if ('done'.startsWith(query.toLowerCase()) && selected.length > 0) {
-            return Promise.resolve(['>> Done selecting objects <<', ...fuse.search(query).map((r) => r.item)]);
+            return Promise.resolve([
+              '>> Done selecting objects <<',
+              ...fuse.search(query).map((r) => r.item),
+            ]);
           }
           return Promise.resolve(fuse.search(query).map((r) => r.item));
         },
@@ -82,17 +87,22 @@ export async function promptFieldSearch(objectName: string, fields: string[]): P
       {
         type: 'autocomplete',
         name: 'field',
-        message: selected.length > 0
-          ? `Selected: [${selected.map(f => f.split('.')[1]).join(', ')}] — Search for another field (or type "done"):`
-          : `Search for a field on ${objectName}:`,
+        message:
+          selected.length > 0
+            ? `Selected: [${selected.map((f) => f.split('.')[1]).join(', ')}] — Search for another field (or type "done"):`
+            : `Search for a field on ${objectName}:`,
         source: (_answers: unknown, input: string | undefined) => {
           const query = (input || '').trim();
           if (!query) {
-            const opts = selected.length > 0 ? ['>> Done selecting fields <<', ...remaining] : remaining;
+            const opts =
+              selected.length > 0 ? ['>> Done selecting fields <<', ...remaining] : remaining;
             return Promise.resolve(opts);
           }
           if ('done'.startsWith(query.toLowerCase()) && selected.length > 0) {
-            return Promise.resolve(['>> Done selecting fields <<', ...fuse.search(query).map((r) => r.item)]);
+            return Promise.resolve([
+              '>> Done selecting fields <<',
+              ...fuse.search(query).map((r) => r.item),
+            ]);
           }
           return Promise.resolve(fuse.search(query).map((r) => r.item));
         },
@@ -121,6 +131,23 @@ export async function promptFieldSearch(objectName: string, fields: string[]): P
   }
 
   return selected;
+}
+
+export type PermissionMode = 'bulk' | 'granular';
+
+export async function promptPermissionMode(): Promise<PermissionMode> {
+  const { mode } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'mode',
+      message: 'How would you like to assign permissions?',
+      choices: [
+        { name: 'Bulk — same permissions for all selected objects/fields', value: 'bulk' },
+        { name: 'Granular — different permissions for each object/field', value: 'granular' },
+      ],
+    },
+  ]);
+  return mode;
 }
 
 export async function promptObjectPermissions(objectNames: string[]): Promise<ObjectPermissions> {
@@ -220,10 +247,7 @@ export async function promptPermissionSetSelection(
   return targets.filter((t) => selectedSet.has(t.name));
 }
 
-export function printPreview(
-  changes: PermissionChange[],
-  targets: PermissionSetTarget[],
-): void {
+export function printPreview(changes: PermissionChange[], targets: PermissionSetTarget[]): void {
   console.log('\n--- Preview ---\n');
 
   for (const target of targets) {
