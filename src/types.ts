@@ -41,21 +41,3 @@ export interface PermissionSetTarget {
   label: string;
 }
 
-export interface ApplyPlan {
-  changes: PermissionChange[];
-  targets: PermissionSetTarget[];
-}
-
-export const OBJECT_PERMISSION_LABELS: Record<ObjectPermissionKey, string> = {
-  allowRead: 'Read',
-  allowCreate: 'Create',
-  allowEdit: 'Edit',
-  allowDelete: 'Delete',
-  viewAllRecords: 'View All',
-  modifyAllRecords: 'Modify All',
-};
-
-export const FIELD_PERMISSION_LABELS: Record<FieldPermissionKey, string> = {
-  readable: 'Read',
-  editable: 'Edit',
-};

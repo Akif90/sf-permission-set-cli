@@ -203,7 +203,7 @@ async function main(): Promise<void> {
           [...byTarget.entries()].filter(([, v]) => v !== null),
         ) as Map<string, ObjectPermissions | FieldPermissions>;
         if (nonNull.size > 0) {
-          printExistingPermissions(sel.name, nonNull);
+          printExistingPermissions(nonNull);
         }
       }
       // Compute union of existing across all targets for pre-checking
@@ -265,7 +265,7 @@ async function main(): Promise<void> {
           [...byTarget.entries()].filter(([, v]) => v !== null),
         ) as Map<string, ObjectPermissions | FieldPermissions>;
         if (nonNull.size > 0) {
-          printExistingPermissions(sel.name, nonNull);
+          printExistingPermissions(nonNull);
         }
       }
       const bulkExisting = new Map<string, FieldPermissions | null>();
@@ -304,7 +304,7 @@ async function main(): Promise<void> {
         [...byTarget.entries()].filter(([, v]) => v !== null),
       ) as Map<string, ObjectPermissions | FieldPermissions>;
       if (nonNull.size > 0) {
-        printExistingPermissions(sel.name, nonNull);
+        printExistingPermissions(nonNull);
       }
       const objExisting = new Map<string, ObjectPermissions | null>();
       for (const t of selectedTargets) {
@@ -331,7 +331,7 @@ async function main(): Promise<void> {
         [...byTarget.entries()].filter(([, v]) => v !== null),
       ) as Map<string, ObjectPermissions | FieldPermissions>;
       if (nonNull.size > 0) {
-        printExistingPermissions(sel.name, nonNull);
+        printExistingPermissions(nonNull);
       }
       const fieldExisting = new Map<string, FieldPermissions | null>();
       for (const t of selectedTargets) {

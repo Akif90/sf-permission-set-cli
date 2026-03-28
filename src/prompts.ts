@@ -9,7 +9,6 @@ import type {
   ObjectPermissionKey,
   FieldPermissionKey,
 } from './types.js';
-import { OBJECT_PERMISSION_LABELS, FIELD_PERMISSION_LABELS } from './types.js';
 
 inquirer.registerPrompt('autocomplete', autocomplete);
 
@@ -158,7 +157,6 @@ export async function promptPermissionMode(): Promise<PermissionMode> {
  * e.g. "  Currently set — Sales_User: Read, Edit | Admin: Read"
  */
 export function printExistingPermissions(
-  itemName: string,
   existingByTarget: Map<string, ObjectPermissions | FieldPermissions>,
 ): void {
   const entries: string[] = [];
