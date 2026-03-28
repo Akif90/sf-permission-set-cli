@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### chore: prepare for npm publishing
+- Added `files`, `main`, `repository`, `engines` fields to package.json
+- Added `prepublishOnly` script to ensure build + tests before every publish
+- Created MIT LICENSE file
+
 ### feat: show existing permissions and allow toggle/reset
 - Permission set selection now happens before permission assignment so existing state can be read
 - Existing permissions are displayed per permission set before the prompt (e.g. "Currently set — Sales_User: Read, Edit")

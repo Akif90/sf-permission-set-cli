@@ -3,16 +3,21 @@
   "version": "0.1.0",
   "description": "Interactive CLI to manage Salesforce permission set XML files",
   "type": "module",
+  "main": "./dist/index.js",
   "bin": {
     "permcraft": "./dist/index.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src/ --ext .ts",
-    "format": "prettier --write 'src/**/*.ts'"
+    "format": "prettier --write 'src/**/*.ts'",
+    "prepublishOnly": "npm run build && npm test"
   },
   "keywords": [
     "salesforce",
@@ -21,6 +26,13 @@
     "cli"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Akif90/sf-permission-set-cli.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "devDependencies": {
     "@types/inquirer": "^9.0.7",
     "@types/inquirer-autocomplete-prompt": "^3.0.3",
