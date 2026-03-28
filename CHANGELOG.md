@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### docs: rewrite README for npm package
+- Updated installation to use `npm install -g permcraft` and `npx permcraft`
+- Updated uninstall instructions to `npm uninstall -g permcraft`
+- Updated examples to reflect current flow (permission sets selected before permissions)
+- Added existing permissions display and diff preview to examples
+- Added development section with repo clone URL
+- Removed outdated UNLINK.txt
+
 ### chore: prepare for npm publishing
 - Added `files`, `main`, `repository`, `engines` fields to package.json
 - Added `prepublishOnly` script to ensure build + tests before every publish
