@@ -1,11 +1,11 @@
 {
   "name": "permcraft",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Interactive CLI to manage Salesforce permission set XML files",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
-    "permcraft": "./dist/index.js"
+    "permcraft": "dist/index.js"
   },
   "files": [
     "dist"
@@ -28,7 +28,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Akif90/sf-permission-set-cli.git"
+    "url": "git+https://github.com/Akif90/sf-permission-set-cli.git"
   },
   "engines": {
     "node": ">=18"

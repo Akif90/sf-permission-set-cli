@@ -1,6 +1,8 @@
 node_modules/
 dist/
 *.tsbuildinfo
-.claude
-PRD.md 
+.claude/
+CLAUDE.md
+PRD.md
+.sfdx/
 
