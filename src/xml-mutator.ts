@@ -82,6 +82,48 @@ function setTextValue(nodes: PermSetNode[], tagName: string, value: string): voi
   nodes.push({ [tagName]: [{ '#text': value }] });
 }
 
+/**
+ * Read existing object permissions from a parsed permission set XML.
+ * Returns null if the object has no entry in the file.
+ */
+export function readExistingObjectPermissions(
+  parsed: PermSetNode[],
+  objectName: string,
+): ObjectPermissions | null {
+  const root = findPermSetRoot(parsed);
+  const existing = findExistingNode(root, 'objectPermissions', 'object', objectName);
+  if (!existing) return null;
+
+  const inner = existing.node['objectPermissions'] as PermSetNode[];
+  return {
+    allowRead: getTextValue(inner, 'allowRead') === 'true',
+    allowCreate: getTextValue(inner, 'allowCreate') === 'true',
+    allowEdit: getTextValue(inner, 'allowEdit') === 'true',
+    allowDelete: getTextValue(inner, 'allowDelete') === 'true',
+    viewAllRecords: getTextValue(inner, 'viewAllRecords') === 'true',
+    modifyAllRecords: getTextValue(inner, 'modifyAllRecords') === 'true',
+  };
+}
+
+/**
+ * Read existing field permissions from a parsed permission set XML.
+ * Returns null if the field has no entry in the file.
+ */
+export function readExistingFieldPermissions(
+  parsed: PermSetNode[],
+  fieldName: string,
+): FieldPermissions | null {
+  const root = findPermSetRoot(parsed);
+  const existing = findExistingNode(root, 'fieldPermissions', 'field', fieldName);
+  if (!existing) return null;
+
+  const inner = existing.node['fieldPermissions'] as PermSetNode[];
+  return {
+    readable: getTextValue(inner, 'readable') === 'true',
+    editable: getTextValue(inner, 'editable') === 'true',
+  };
+}
+
 export function detectIndentation(content: string): string {
   const match = content.match(/^( +|\t+)</m);
   return match ? match[1] : '    ';
@@ -159,8 +201,9 @@ function findInsertionIndex(
 }
 
 /**
- * Apply object permissions — only sets permissions the user explicitly enabled (true).
- * Existing permissions that the user did not select are left unchanged.
+ * Apply object permissions — writes the exact state provided.
+ * The caller is responsible for showing the user existing state and
+ * letting them toggle permissions on/off.
  */
 export function applyObjectPermission(
   parsed: PermSetNode[],
@@ -171,18 +214,13 @@ export function applyObjectPermission(
   const existing = findExistingNode(root, 'objectPermissions', 'object', objectName);
 
   if (existing) {
-    // Merge: only upgrade permissions to true, never downgrade existing true → false
     const inner = existing.node['objectPermissions'] as PermSetNode[];
-    const keys: (keyof ObjectPermissions)[] = [
-      'allowCreate', 'allowDelete', 'allowEdit', 'allowRead',
-      'modifyAllRecords', 'viewAllRecords',
-    ];
-    for (const key of keys) {
-      if (perms[key]) {
-        setTextValue(inner, key, 'true');
-      }
-      // If perms[key] is false, leave the existing value untouched
-    }
+    setTextValue(inner, 'allowCreate', boolStr(perms.allowCreate));
+    setTextValue(inner, 'allowDelete', boolStr(perms.allowDelete));
+    setTextValue(inner, 'allowEdit', boolStr(perms.allowEdit));
+    setTextValue(inner, 'allowRead', boolStr(perms.allowRead));
+    setTextValue(inner, 'modifyAllRecords', boolStr(perms.modifyAllRecords));
+    setTextValue(inner, 'viewAllRecords', boolStr(perms.viewAllRecords));
   } else {
     const newNode = buildObjectPermissionNode(objectName, perms);
     const idx = findInsertionIndex(root, 'objectPermissions', 'object', objectName);
@@ -191,8 +229,9 @@ export function applyObjectPermission(
 }
 
 /**
- * Apply field permissions — only sets permissions the user explicitly enabled (true).
- * Existing permissions that the user did not select are left unchanged.
+ * Apply field permissions — writes the exact state provided.
+ * The caller is responsible for showing the user existing state and
+ * letting them toggle permissions on/off.
  */
 export function applyFieldPermission(
   parsed: PermSetNode[],
@@ -204,12 +243,8 @@ export function applyFieldPermission(
 
   if (existing) {
     const inner = existing.node['fieldPermissions'] as PermSetNode[];
-    if (perms.editable) {
-      setTextValue(inner, 'editable', 'true');
-    }
-    if (perms.readable) {
-      setTextValue(inner, 'readable', 'true');
-    }
+    setTextValue(inner, 'editable', boolStr(perms.editable));
+    setTextValue(inner, 'readable', boolStr(perms.readable));
   } else {
     const newNode = buildFieldPermissionNode(fieldName, perms);
     const idx = findInsertionIndex(root, 'fieldPermissions', 'field', fieldName);

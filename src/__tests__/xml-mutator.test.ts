@@ -8,6 +8,8 @@ import {
   createEmptyPermissionSet,
   applyObjectPermission,
   applyFieldPermission,
+  readExistingObjectPermissions,
+  readExistingFieldPermissions,
   serializePermissionSetXml,
   writePermissionSetFile,
   detectIndentation,
@@ -101,38 +103,74 @@ describe('applyFieldPermission', () => {
     expect(xml).toContain('<editable>false</editable>');
   });
 
-  it('should not downgrade existing field permission', () => {
+  it('should write exact field permission state (allow toggle off)', () => {
     // Admin fixture has Account.Industry with editable=true, readable=true
     const parsed = parsePermissionSetXml(join(FIXTURES_DIR, 'Admin.permissionset-meta.xml'));
     applyFieldPermission(parsed, 'Account.Industry', {
       readable: true,
-      editable: false, // user did not select Edit — existing true should remain
+      editable: false, // user explicitly toggled Edit off
     });
     const xml = serializePermissionSetXml(parsed);
     expect(xml).toContain('<field>Account.Industry</field>');
-    expect(xml).toContain('<editable>true</editable>'); // preserved, not overwritten
+    expect(xml).toContain('<editable>false</editable>'); // toggled off
     const fieldCount = (xml.match(/<field>Account\.Industry<\/field>/g) || []).length;
     expect(fieldCount).toBe(1);
   });
 });
 
-describe('merge behavior — never downgrade existing permissions', () => {
-  it('should preserve existing true permissions when user selects false', () => {
+describe('apply writes exact state (supports toggle off)', () => {
+  it('should allow revoking existing object permissions', () => {
     // Admin fixture: Account has allowCreate=true, allowDelete=true, allowEdit=true, allowRead=true
     const parsed = parsePermissionSetXml(join(FIXTURES_DIR, 'Admin.permissionset-meta.xml'));
     applyObjectPermission(parsed, 'Account', {
       allowRead: true,
-      allowCreate: false, // user didn't select Create, but it's already true
-      allowEdit: false,   // user didn't select Edit, but it's already true
-      allowDelete: false,
-      viewAllRecords: true, // user selected this — should upgrade
+      allowCreate: false, // revoke
+      allowEdit: false,   // revoke
+      allowDelete: false,  // revoke
+      viewAllRecords: true, // add
       modifyAllRecords: false,
     });
     const xml = serializePermissionSetXml(parsed);
-    expect(xml).toContain('<allowCreate>true</allowCreate>');  // preserved
-    expect(xml).toContain('<allowEdit>true</allowEdit>');      // preserved
-    expect(xml).toContain('<allowDelete>true</allowDelete>');  // preserved
-    expect(xml).toContain('<viewAllRecords>true</viewAllRecords>'); // upgraded
+    expect(xml).toContain('<allowCreate>false</allowCreate>');
+    expect(xml).toContain('<allowEdit>false</allowEdit>');
+    expect(xml).toContain('<allowDelete>false</allowDelete>');
+    expect(xml).toContain('<viewAllRecords>true</viewAllRecords>');
+  });
+});
+
+describe('readExistingObjectPermissions', () => {
+  it('should read existing object permissions', () => {
+    const parsed = parsePermissionSetXml(join(FIXTURES_DIR, 'Admin.permissionset-meta.xml'));
+    const perms = readExistingObjectPermissions(parsed, 'Account');
+    expect(perms).not.toBeNull();
+    expect(perms!.allowRead).toBe(true);
+    expect(perms!.allowCreate).toBe(true);
+    expect(perms!.allowEdit).toBe(true);
+    expect(perms!.allowDelete).toBe(true);
+    expect(perms!.modifyAllRecords).toBe(false);
+    expect(perms!.viewAllRecords).toBe(false);
+  });
+
+  it('should return null for non-existent object', () => {
+    const parsed = parsePermissionSetXml(join(FIXTURES_DIR, 'Admin.permissionset-meta.xml'));
+    const perms = readExistingObjectPermissions(parsed, 'NonExistent__c');
+    expect(perms).toBeNull();
+  });
+});
+
+describe('readExistingFieldPermissions', () => {
+  it('should read existing field permissions', () => {
+    const parsed = parsePermissionSetXml(join(FIXTURES_DIR, 'Admin.permissionset-meta.xml'));
+    const perms = readExistingFieldPermissions(parsed, 'Account.Industry');
+    expect(perms).not.toBeNull();
+    expect(perms!.readable).toBe(true);
+    expect(perms!.editable).toBe(true);
+  });
+
+  it('should return null for non-existent field', () => {
+    const parsed = parsePermissionSetXml(join(FIXTURES_DIR, 'Admin.permissionset-meta.xml'));
+    const perms = readExistingFieldPermissions(parsed, 'Account.NonExistent');
+    expect(perms).toBeNull();
   });
 });
 

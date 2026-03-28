@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### feat: show existing permissions and allow toggle/reset
+- Permission set selection now happens before permission assignment so existing state can be read
+- Existing permissions are displayed per permission set before the prompt (e.g. "Currently set — Sales_User: Read, Edit")
+- Permission checkboxes are pre-checked based on the union of existing permissions across selected permission sets
+- Users can now uncheck to revoke/reset existing permissions (previously only upgrades were possible)
+- Preview now shows a diff with `+added`, `-removed`, `=unchanged` indicators and a legend
+- Added `readExistingObjectPermissions` and `readExistingFieldPermissions` to xml-mutator
+- Apply functions now write exact state provided by user (supports both granting and revoking)
+
 ### feat: project scaffold and core CLI
 - Initialized project with TypeScript, ESM, vitest, eslint, prettier
 - Created CLI entry point with `--help` and `--version` flags

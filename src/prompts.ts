@@ -6,7 +6,10 @@ import type {
   FieldPermissions,
   PermissionSetTarget,
   PermissionChange,
+  ObjectPermissionKey,
+  FieldPermissionKey,
 } from './types.js';
+import { OBJECT_PERMISSION_LABELS, FIELD_PERMISSION_LABELS } from './types.js';
 
 inquirer.registerPrompt('autocomplete', autocomplete);
 
@@ -150,14 +153,93 @@ export async function promptPermissionMode(): Promise<PermissionMode> {
   return mode;
 }
 
-export async function promptObjectPermissions(objectNames: string[]): Promise<ObjectPermissions> {
+/**
+ * Show existing permissions summary across permission sets.
+ * e.g. "  Currently set — Sales_User: Read, Edit | Admin: Read"
+ */
+export function printExistingPermissions(
+  itemName: string,
+  existingByTarget: Map<string, ObjectPermissions | FieldPermissions>,
+): void {
+  const entries: string[] = [];
+  for (const [targetName, perms] of existingByTarget) {
+    const enabled: string[] = [];
+    if ('allowRead' in perms) {
+      const p = perms as ObjectPermissions;
+      if (p.allowRead) enabled.push('Read');
+      if (p.allowCreate) enabled.push('Create');
+      if (p.allowEdit) enabled.push('Edit');
+      if (p.allowDelete) enabled.push('Delete');
+      if (p.viewAllRecords) enabled.push('View All');
+      if (p.modifyAllRecords) enabled.push('Modify All');
+    } else {
+      const p = perms as FieldPermissions;
+      if (p.readable) enabled.push('Read');
+      if (p.editable) enabled.push('Edit');
+    }
+    if (enabled.length > 0) {
+      entries.push(`${targetName}: ${enabled.join(', ')}`);
+    } else {
+      entries.push(`${targetName}: (none)`);
+    }
+  }
+  if (entries.length > 0) {
+    console.log(`  Currently set — ${entries.join(' | ')}`);
+  }
+}
+
+/**
+ * Compute which permissions are enabled in ANY of the selected permission sets.
+ * This union becomes the pre-checked default so the user sees everything that's currently on.
+ */
+function computeObjectPermissionUnion(
+  existingByTarget: Map<string, ObjectPermissions | null>,
+): ObjectPermissions {
+  const union: ObjectPermissions = {
+    allowRead: false,
+    allowCreate: false,
+    allowEdit: false,
+    allowDelete: false,
+    viewAllRecords: false,
+    modifyAllRecords: false,
+  };
+  for (const perms of existingByTarget.values()) {
+    if (!perms) continue;
+    for (const key of Object.keys(union) as ObjectPermissionKey[]) {
+      if (perms[key]) union[key] = true;
+    }
+  }
+  return union;
+}
+
+function computeFieldPermissionUnion(
+  existingByTarget: Map<string, FieldPermissions | null>,
+): FieldPermissions {
+  const union: FieldPermissions = { readable: false, editable: false };
+  for (const perms of existingByTarget.values()) {
+    if (!perms) continue;
+    for (const key of Object.keys(union) as FieldPermissionKey[]) {
+      if (perms[key]) union[key] = true;
+    }
+  }
+  return union;
+}
+
+export async function promptObjectPermissions(
+  objectNames: string[],
+  existingByTarget?: Map<string, ObjectPermissions | null>,
+): Promise<ObjectPermissions> {
+  const preChecked = existingByTarget
+    ? computeObjectPermissionUnion(existingByTarget)
+    : undefined;
+
   const permChoices = [
-    { name: 'Read', value: 'allowRead' },
-    { name: 'Create', value: 'allowCreate' },
-    { name: 'Edit', value: 'allowEdit' },
-    { name: 'Delete', value: 'allowDelete' },
-    { name: 'View All', value: 'viewAllRecords' },
-    { name: 'Modify All', value: 'modifyAllRecords' },
+    { name: 'Read', value: 'allowRead', checked: preChecked?.allowRead ?? false },
+    { name: 'Create', value: 'allowCreate', checked: preChecked?.allowCreate ?? false },
+    { name: 'Edit', value: 'allowEdit', checked: preChecked?.allowEdit ?? false },
+    { name: 'Delete', value: 'allowDelete', checked: preChecked?.allowDelete ?? false },
+    { name: 'View All', value: 'viewAllRecords', checked: preChecked?.viewAllRecords ?? false },
+    { name: 'Modify All', value: 'modifyAllRecords', checked: preChecked?.modifyAllRecords ?? false },
   ];
 
   const label =
@@ -186,10 +268,17 @@ export async function promptObjectPermissions(objectNames: string[]): Promise<Ob
   };
 }
 
-export async function promptFieldPermissions(fieldNames: string[]): Promise<FieldPermissions> {
+export async function promptFieldPermissions(
+  fieldNames: string[],
+  existingByTarget?: Map<string, FieldPermissions | null>,
+): Promise<FieldPermissions> {
+  const preChecked = existingByTarget
+    ? computeFieldPermissionUnion(existingByTarget)
+    : undefined;
+
   const permChoices = [
-    { name: 'Read', value: 'readable' },
-    { name: 'Edit', value: 'editable' },
+    { name: 'Read', value: 'readable', checked: preChecked?.readable ?? false },
+    { name: 'Edit', value: 'editable', checked: preChecked?.editable ?? false },
   ];
 
   const label =
@@ -247,42 +336,70 @@ export async function promptPermissionSetSelection(
   return targets.filter((t) => selectedSet.has(t.name));
 }
 
-export function printPreview(changes: PermissionChange[], targets: PermissionSetTarget[]): void {
+export function printPreview(
+  changes: PermissionChange[],
+  targets: PermissionSetTarget[],
+  existingPerms: Map<string, Map<string, ObjectPermissions | FieldPermissions | null>>,
+): void {
   console.log('\n--- Preview ---\n');
 
   for (const target of targets) {
     console.log(`Permission Set: ${target.name}`);
+    const targetExisting = existingPerms.get(target.name);
 
     for (const change of changes) {
       const itemName = change.selection.name;
-
-      const permEntries: string[] = [];
+      const existing = targetExisting?.get(itemName) ?? null;
       const perms = change.permissions;
+
+      const added: string[] = [];
+      const removed: string[] = [];
+      const unchanged: string[] = [];
 
       if ('allowRead' in perms) {
         const p = perms as ObjectPermissions;
-        if (p.allowRead) permEntries.push('Read');
-        if (p.allowCreate) permEntries.push('Create');
-        if (p.allowEdit) permEntries.push('Edit');
-        if (p.allowDelete) permEntries.push('Delete');
-        if (p.viewAllRecords) permEntries.push('View All');
-        if (p.modifyAllRecords) permEntries.push('Modify All');
+        const e = (existing as ObjectPermissions | null) ?? {
+          allowRead: false, allowCreate: false, allowEdit: false,
+          allowDelete: false, viewAllRecords: false, modifyAllRecords: false,
+        };
+        const labels: [ObjectPermissionKey, string][] = [
+          ['allowRead', 'Read'], ['allowCreate', 'Create'], ['allowEdit', 'Edit'],
+          ['allowDelete', 'Delete'], ['viewAllRecords', 'View All'], ['modifyAllRecords', 'Modify All'],
+        ];
+        for (const [key, label] of labels) {
+          if (p[key] && !e[key]) added.push(label);
+          else if (!p[key] && e[key]) removed.push(label);
+          else if (p[key] && e[key]) unchanged.push(label);
+        }
       } else {
         const p = perms as FieldPermissions;
-        if (p.readable) permEntries.push('Read');
-        if (p.editable) permEntries.push('Edit');
+        const e = (existing as FieldPermissions | null) ?? { readable: false, editable: false };
+        if (p.readable && !e.readable) added.push('Read');
+        else if (!p.readable && e.readable) removed.push('Read');
+        else if (p.readable && e.readable) unchanged.push('Read');
+
+        if (p.editable && !e.editable) added.push('Edit');
+        else if (!p.editable && e.editable) removed.push('Edit');
+        else if (p.editable && e.editable) unchanged.push('Edit');
       }
+
+      const parts: string[] = [];
+      if (added.length > 0) parts.push(`+${added.join(', ')}`);
+      if (removed.length > 0) parts.push(`-${removed.join(', ')}`);
+      if (unchanged.length > 0) parts.push(`=${unchanged.join(', ')}`);
 
       let autoStr = '';
       if (change.autoEnabled.length > 0) {
         autoStr = ` (auto-enabled: ${change.autoEnabled.join(', ')})`;
       }
 
-      console.log(`  + ${itemName}: ${permEntries.join(', ')}${autoStr}`);
+      console.log(`  ${itemName}: ${parts.join('  ')}${autoStr}`);
     }
 
     console.log();
   }
+
+  console.log('  Legend: +added  -removed  =unchanged\n');
 }
 
 export async function promptConfirm(): Promise<boolean> {

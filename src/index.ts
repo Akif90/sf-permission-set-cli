@@ -10,6 +10,7 @@ import {
   promptObjectPermissions,
   promptFieldPermissions,
   promptPermissionSetSelection,
+  printExistingPermissions,
   printPreview,
   promptConfirm,
 } from './prompts.js';
@@ -19,6 +20,8 @@ import {
   createEmptyPermissionSet,
   applyObjectPermission,
   applyFieldPermission,
+  readExistingObjectPermissions,
+  readExistingFieldPermissions,
   serializePermissionSetXml,
   writePermissionSetFile,
   detectIndentation,
@@ -26,6 +29,7 @@ import {
 import type {
   SelectionItem,
   PermissionChange,
+  PermissionSetTarget,
   ObjectPermissions,
   FieldPermissions,
 } from './types.js';
@@ -71,6 +75,51 @@ Requirements:
   process.exit(0);
 }
 
+/**
+ * Parse all selected permission set files upfront so we can read
+ * existing permissions before prompting the user.
+ */
+function loadParsedTargets(
+  targets: PermissionSetTarget[],
+): Map<string, { parsed: unknown[]; indent: string }> {
+  const map = new Map<string, { parsed: unknown[]; indent: string }>();
+  for (const t of targets) {
+    if (t.filePath && existsSync(t.filePath)) {
+      const content = readFileSync(t.filePath, 'utf-8');
+      map.set(t.name, {
+        parsed: parsePermissionSetXml(t.filePath),
+        indent: detectIndentation(content),
+      });
+    }
+  }
+  return map;
+}
+
+/**
+ * Read existing permissions for a given item across all selected permission sets.
+ */
+function readExistingForItem(
+  itemType: 'object' | 'field',
+  itemName: string,
+  targets: PermissionSetTarget[],
+  parsedFiles: Map<string, { parsed: unknown[] }>,
+): Map<string, ObjectPermissions | FieldPermissions | null> {
+  const result = new Map<string, ObjectPermissions | FieldPermissions | null>();
+  for (const t of targets) {
+    const entry = parsedFiles.get(t.name);
+    if (!entry) {
+      result.set(t.name, null);
+      continue;
+    }
+    if (itemType === 'object') {
+      result.set(t.name, readExistingObjectPermissions(entry.parsed as never[], itemName));
+    } else {
+      result.set(t.name, readExistingFieldPermissions(entry.parsed as never[], itemName));
+    }
+  }
+  return result;
+}
+
 async function main(): Promise<void> {
   console.log('Permcraft — Salesforce Permission Set Editor\n');
 
@@ -107,7 +156,34 @@ async function main(): Promise<void> {
     }
   }
 
-  // Step 4: Choose permission mode and assign permissions
+  // Step 4: Select permission sets FIRST (so we can read existing state)
+  console.log('\nScanning local permission sets...');
+  const allTargets = discoverLocalPermissionSets(packageDirs);
+  console.log(`Found ${allTargets.length} permission sets.\n`);
+
+  const selectedTargets = await promptPermissionSetSelection(allTargets);
+
+  // Parse selected permission set files to read existing permissions
+  const parsedFiles = loadParsedTargets(selectedTargets);
+
+  // Build a map of existing permissions: targetName → itemName → perms
+  const existingPerms = new Map<string, Map<string, ObjectPermissions | FieldPermissions | null>>();
+  for (const t of selectedTargets) {
+    const itemMap = new Map<string, ObjectPermissions | FieldPermissions | null>();
+    const entry = parsedFiles.get(t.name);
+    for (const sel of allSelections) {
+      if (!entry) {
+        itemMap.set(sel.name, null);
+      } else if (sel.type === 'object') {
+        itemMap.set(sel.name, readExistingObjectPermissions(entry.parsed as never[], sel.name));
+      } else {
+        itemMap.set(sel.name, readExistingFieldPermissions(entry.parsed as never[], sel.name));
+      }
+    }
+    existingPerms.set(t.name, itemMap);
+  }
+
+  // Step 5: Choose permission mode and assign permissions
   const changes: PermissionChange[] = [];
   const objectSelections = allSelections.filter((s) => s.type === 'object');
   const fieldSelections = allSelections.filter((s) => s.type === 'field');
@@ -116,10 +192,59 @@ async function main(): Promise<void> {
   const mode = hasMultipleItems ? await promptPermissionMode() : 'bulk';
 
   if (mode === 'bulk') {
-    // Same permissions for all objects, same permissions for all fields
     if (objectSelections.length > 0) {
       console.log();
-      const rawPerms = await promptObjectPermissions(objectSelections.map((s) => s.name));
+      // Show existing state for each object across permission sets
+      for (const sel of objectSelections) {
+        const byTarget = readExistingForItem(
+          'object', sel.name, selectedTargets, parsedFiles,
+        ) as Map<string, ObjectPermissions | FieldPermissions>;
+        const nonNull = new Map(
+          [...byTarget.entries()].filter(([, v]) => v !== null),
+        ) as Map<string, ObjectPermissions | FieldPermissions>;
+        if (nonNull.size > 0) {
+          printExistingPermissions(sel.name, nonNull);
+        }
+      }
+      // Compute union of existing across all targets for pre-checking
+      const objExisting = new Map<string, ObjectPermissions | null>();
+      for (const t of selectedTargets) {
+        for (const sel of objectSelections) {
+          const perms = existingPerms.get(t.name)?.get(sel.name) as ObjectPermissions | null;
+          if (perms) {
+            const current = objExisting.get(t.name);
+            if (!current) {
+              objExisting.set(t.name, { ...perms });
+            } else {
+              // Merge: union
+              for (const key of Object.keys(current) as (keyof ObjectPermissions)[]) {
+                if (perms[key]) current[key] = true;
+              }
+            }
+          }
+        }
+      }
+      // For bulk mode, merge all existing across ALL targets + items into one union
+      const bulkExisting = new Map<string, ObjectPermissions | null>();
+      for (const t of selectedTargets) {
+        const merged: ObjectPermissions = {
+          allowRead: false, allowCreate: false, allowEdit: false,
+          allowDelete: false, viewAllRecords: false, modifyAllRecords: false,
+        };
+        for (const sel of objectSelections) {
+          const perms = existingPerms.get(t.name)?.get(sel.name) as ObjectPermissions | null;
+          if (perms) {
+            for (const key of Object.keys(merged) as (keyof ObjectPermissions)[]) {
+              if (perms[key]) merged[key] = true;
+            }
+          }
+        }
+        bulkExisting.set(t.name, merged);
+      }
+      const rawPerms = await promptObjectPermissions(
+        objectSelections.map((s) => s.name),
+        bulkExisting,
+      );
       const { resolved, autoEnabled } = resolveObjectDependencies(rawPerms);
       const autoLabels = autoEnabled.map((k) => OBJECT_PERM_LABEL_MAP[k] || k);
       if (autoLabels.length > 0) {
@@ -132,7 +257,33 @@ async function main(): Promise<void> {
 
     if (fieldSelections.length > 0) {
       console.log();
-      const rawPerms = await promptFieldPermissions(fieldSelections.map((s) => s.name));
+      for (const sel of fieldSelections) {
+        const byTarget = readExistingForItem(
+          'field', sel.name, selectedTargets, parsedFiles,
+        ) as Map<string, ObjectPermissions | FieldPermissions>;
+        const nonNull = new Map(
+          [...byTarget.entries()].filter(([, v]) => v !== null),
+        ) as Map<string, ObjectPermissions | FieldPermissions>;
+        if (nonNull.size > 0) {
+          printExistingPermissions(sel.name, nonNull);
+        }
+      }
+      const bulkExisting = new Map<string, FieldPermissions | null>();
+      for (const t of selectedTargets) {
+        const merged: FieldPermissions = { readable: false, editable: false };
+        for (const sel of fieldSelections) {
+          const perms = existingPerms.get(t.name)?.get(sel.name) as FieldPermissions | null;
+          if (perms) {
+            if (perms.readable) merged.readable = true;
+            if (perms.editable) merged.editable = true;
+          }
+        }
+        bulkExisting.set(t.name, merged);
+      }
+      const rawPerms = await promptFieldPermissions(
+        fieldSelections.map((s) => s.name),
+        bulkExisting,
+      );
       const { resolved, autoEnabled } = resolveFieldDependencies(rawPerms);
       const autoLabels = autoEnabled.map((k) => FIELD_PERM_LABEL_MAP[k] || k);
       if (autoLabels.length > 0) {
@@ -143,10 +294,26 @@ async function main(): Promise<void> {
       }
     }
   } else {
-    // Granular: individual permissions for each object and field
+    // Granular mode
     for (const sel of objectSelections) {
       console.log();
-      const rawPerms = await promptObjectPermissions([sel.name]);
+      const byTarget = readExistingForItem(
+        'object', sel.name, selectedTargets, parsedFiles,
+      ) as Map<string, ObjectPermissions | FieldPermissions>;
+      const nonNull = new Map(
+        [...byTarget.entries()].filter(([, v]) => v !== null),
+      ) as Map<string, ObjectPermissions | FieldPermissions>;
+      if (nonNull.size > 0) {
+        printExistingPermissions(sel.name, nonNull);
+      }
+      const objExisting = new Map<string, ObjectPermissions | null>();
+      for (const t of selectedTargets) {
+        objExisting.set(
+          t.name,
+          (existingPerms.get(t.name)?.get(sel.name) as ObjectPermissions | null) ?? null,
+        );
+      }
+      const rawPerms = await promptObjectPermissions([sel.name], objExisting);
       const { resolved, autoEnabled } = resolveObjectDependencies(rawPerms);
       const autoLabels = autoEnabled.map((k) => OBJECT_PERM_LABEL_MAP[k] || k);
       if (autoLabels.length > 0) {
@@ -157,7 +324,23 @@ async function main(): Promise<void> {
 
     for (const sel of fieldSelections) {
       console.log();
-      const rawPerms = await promptFieldPermissions([sel.name]);
+      const byTarget = readExistingForItem(
+        'field', sel.name, selectedTargets, parsedFiles,
+      ) as Map<string, ObjectPermissions | FieldPermissions>;
+      const nonNull = new Map(
+        [...byTarget.entries()].filter(([, v]) => v !== null),
+      ) as Map<string, ObjectPermissions | FieldPermissions>;
+      if (nonNull.size > 0) {
+        printExistingPermissions(sel.name, nonNull);
+      }
+      const fieldExisting = new Map<string, FieldPermissions | null>();
+      for (const t of selectedTargets) {
+        fieldExisting.set(
+          t.name,
+          (existingPerms.get(t.name)?.get(sel.name) as FieldPermissions | null) ?? null,
+        );
+      }
+      const rawPerms = await promptFieldPermissions([sel.name], fieldExisting);
       const { resolved, autoEnabled } = resolveFieldDependencies(rawPerms);
       const autoLabels = autoEnabled.map((k) => FIELD_PERM_LABEL_MAP[k] || k);
       if (autoLabels.length > 0) {
@@ -172,15 +355,8 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // Step 5: Select local permission sets
-  console.log('\nScanning local permission sets...');
-  const allTargets = discoverLocalPermissionSets(packageDirs);
-  console.log(`Found ${allTargets.length} permission sets.\n`);
-
-  const selectedTargets = await promptPermissionSetSelection(allTargets);
-
-  // Step 6: Preview
-  printPreview(changes, selectedTargets);
+  // Step 6: Preview with diff
+  printPreview(changes, selectedTargets, existingPerms);
 
   // Step 7: Confirm and apply
   const confirmed = await promptConfirm();
@@ -193,32 +369,37 @@ async function main(): Promise<void> {
 
   for (const target of selectedTargets) {
     const filePath = target.filePath!;
-    let parsed;
-    let indent = '    ';
+    const cached = parsedFiles.get(target.name);
+    let parsed: unknown[];
+    let indent: string;
 
-    if (existsSync(filePath)) {
-      const content = readFileSync(filePath, 'utf-8');
-      indent = detectIndentation(content);
-      parsed = parsePermissionSetXml(filePath);
+    if (cached) {
+      parsed = cached.parsed;
+      indent = cached.indent;
       console.log(`  Updating ${filePath}`);
     } else {
       parsed = createEmptyPermissionSet(target.name, target.label);
+      indent = '    ';
       console.log(`  Creating ${filePath}`);
     }
 
     for (const change of changes) {
       if (change.selection.type === 'object') {
         applyObjectPermission(
-          parsed,
+          parsed as never[],
           change.selection.name,
           change.permissions as ObjectPermissions,
         );
       } else {
-        applyFieldPermission(parsed, change.selection.name, change.permissions as FieldPermissions);
+        applyFieldPermission(
+          parsed as never[],
+          change.selection.name,
+          change.permissions as FieldPermissions,
+        );
       }
     }
 
-    const xml = serializePermissionSetXml(parsed, indent);
+    const xml = serializePermissionSetXml(parsed as never[], indent);
     writePermissionSetFile(filePath, xml);
   }
 
