@@ -1,6 +1,6 @@
 {
   "name": "permcraft",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Interactive CLI to manage Salesforce permission set XML files",
   "type": "module",
   "main": "./dist/index.js",
